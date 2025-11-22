@@ -17,7 +17,13 @@ class DateUtils {
         formatter.locale = Locale(identifier: "en_US_POSIX")
     }
     
+    // Converts Date object to "20251122"
     func dateKey(from date: Date) -> String {
         return formatter.string(from: date)
+    }
+    
+    // NEW: Converts "20251122" back to Date object
+    func date(from string: String) -> Date? {
+        return formatter.date(from: string)
     }
 }

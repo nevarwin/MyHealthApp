@@ -93,8 +93,9 @@ class DBHelper {
             while sqlite3_step(stmt) == SQLITE_ROW {
                 let dateStr = String(cString: sqlite3_column_text(stmt, 0))
                 let val = sqlite3_column_double(stmt, 1)
-                // Mocking an ID and Date object for the UI model
-                result.append(WalkData(id: dateStr, startDate: Date(), value: val))
+                // FIX: Convert the string "20251122" back to a real Date object
+                let realDate = DateUtils.shared.date(from: dateStr) ?? Date()
+                result.append(WalkData(id: dateStr, startDate: realDate, value: val))
             }
         }
         sqlite3_finalize(stmt)

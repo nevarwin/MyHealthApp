@@ -33,7 +33,7 @@ struct DistanceDetailView: View {
                         VStack(alignment: .leading) {
                             Text("Distance")
                                 .font(.headline)
-                            Text(walk.startDate.formatted(date: .abbreviated, time: .shortened))
+                            Text(walk.startDate.formatted(date: .abbreviated, time: .omitted))
                                 .font(.caption)
                                 .foregroundColor(.gray)
                         }

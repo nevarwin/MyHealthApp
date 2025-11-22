@@ -31,8 +31,6 @@ class HealthKitManager: ObservableObject {
     func saveAnchor(_ newAnchor: HKQueryAnchor) {
         // We must convert the Anchor object to Data to save it
         if let data = try? NSKeyedArchiver.archivedData(withRootObject: newAnchor, requiringSecureCoding: true) {
-            print("anchor data: ", data)
-            print("anchor newAnchor: ", newAnchor)
             UserDefaults.standard.set(data, forKey: anchorKey)
             self.anchor = newAnchor
         }
