@@ -67,7 +67,6 @@ class HealthKitManager: ObservableObject {
         
         guard let type = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) else { return }
         
-        // Note: We pass self.anchor (which might be loaded from disk now)
         let query = HKAnchoredObjectQuery(type: type, predicate: nil, anchor: self.anchor, limit: HKObjectQueryNoLimit) { [weak self] (_, newSamples, deletedSamples, newAnchor, error) in
             
             guard let self = self else { return }
@@ -75,34 +74,32 @@ class HealthKitManager: ObservableObject {
             
             if let error = error { print("Error: \(error)"); return }
             
-            // --- VITAL CHANGE ---
-            // Save the new anchor to disk immediately
-            if let newAnchor = newAnchor {
-                self.saveAnchor(newAnchor)
-            }
-            
-            // Logic to Group Data
+            // STEP 1: Process the Data (Grouping)
             var dailyTotals: [String: Double] = [:]
             
-            if let samples = newSamples as? [HKQuantitySample] {
-                print("sample: ", samples)
-                // If we have an anchor, this list will be EMPTY if there is no new data
-                if samples.isEmpty {
-                    print("No new data found since last check.")
-                    return
-                }
-                
-                print("Found \(samples.count) new items.")
+            if let samples = newSamples as? [HKQuantitySample], !samples.isEmpty {
+                print("Found \(samples.count) new items. Processing...")
                 
                 for sample in samples {
                     let dateKey = DateUtils.shared.dateKey(from: sample.startDate)
                     let distance = sample.quantity.doubleValue(for: .meter())
                     dailyTotals[dateKey, default: 0.0] += distance
                 }
+                
+                // STEP 2: Write to Database
+                // We only write if we actually calculated totals
+                for (dateStr, totalDistance) in dailyTotals {
+                    self.dbHelper.addDistanceToDate(dateStr: dateStr, amountToAdd: totalDistance)
+                }
+            } else {
+                print("No new data to process.")
             }
             
-            for (dateStr, totalDistance) in dailyTotals {
-                self.dbHelper.addDistanceToDate(dateStr: dateStr, amountToAdd: totalDistance)
+            // STEP 3: Save the Anchor (ONLY after DB is updated)
+            // We do this last so if Step 2 crashes, we download the data again next time.
+            if let newAnchor = newAnchor {
+                self.saveAnchor(newAnchor)
+                print("Anchor saved.")
             }
             
             self.loadLocalData()
