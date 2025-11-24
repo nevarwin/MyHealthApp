@@ -1,0 +1,169 @@
+//
+//  GetHealthDifference.swift
+//  MyHealthApp
+//
+//  Created by raven on 11/24/25.
+//
+
+import Foundation
+
+@objc func getHealthDifferenceTravelDistanceData(_ completion: (() -> Void)?) {
+    guard let quantityType = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) else {
+        assertionFailure()
+        completion?()
+        return
+    }
+    
+    let currentAnchor = HealthUtility.anchor(type: .distanceWalkingRunning)
+    
+    let anchoredObjectQuery = HKAnchoredObjectQuery(type: quantityType, predicate: nil, anchor: currentAnchor, limit: HKObjectQueryNoLimit) { (query, samples, deletedObjects, newAnchor, error) in
+        
+        // 1. Handle Errors First
+        if let error = error {
+            Log.print("[TRAVEL DISTANCE][ERROR]", error.localizedDescription)
+            DispatchQueue.main.async { completion?() }
+            return
+        }
+        
+        // 2. Handle Deletions (Update DB First)
+        if let deletedObjects = deletedObjects, !deletedObjects.isEmpty {
+            let deletedUUIDs = deletedObjects.map { $0.uuid.uuidString }
+            // FIX: Actually call your DB delete function here
+            HealthUtility.deleteHealthDataFromDB(uuids: deletedUUIDs, type: .TRAVEL_DISTANCE)
+            print("Deleted \(deletedObjects.count) objects from DB.")
+        }
+        
+        // 3. Handle New Data (Update DB Second)
+        if let samples = samples, !samples.isEmpty {
+            print("New samples received: \(samples.count)")
+            HealthUtility.setHealthDataToDB_dataArray(samples, type: .TRAVEL_DISTANCE)
+        } else {
+            print("No new samples.")
+        }
+        
+        // 4. Save Anchor LAST (Safety Net)
+        // Only save if steps 2 and 3 didn't crash
+        if let newAnchor = newAnchor {
+            HealthUtility.setAnchor(type: .distanceWalkingRunning, queryAnchor: newAnchor)
+        }
+        
+        Log.print("[TRAVEL DISTANCE] finished")
+        DispatchQueue.main.async {
+            completion?()
+        }
+    }
+    
+    HealthUtility.store.execute(anchoredObjectQuery)
+}
+
+static func setHealthDataToDB_dataArray(_ samples: [HKQuantitySample], type: HealthType) {
+    // 1. MEMORY GROUPING: Dictionary to hold totals per day
+    // Key = "20251124" (Date String), Value = Total Distance in Meters
+    var dailyTotals: [String: Double] = [:]
+    
+    // We also need to keep one sample per day to extract metadata (Device Name, SyncKey, etc.)
+    var dailyMetadataSamples: [String: HKQuantitySample] = [:]
+
+    print("Processing \(samples.count) samples...")
+
+    // 2. Loop through samples ONCE
+    for sample in samples {
+        // Calculate the Date Key (yyyyMMdd)
+        let comps = HealthUtility.currentDateComponents(from: sample.startDate)
+        guard let year = comps.year, let month = comps.month, let day = comps.day else { continue }
+        let dateKey = String(format: "%04d%02d%02d", year, month, day)
+        
+        // Get Distance
+        let distance = sample.quantity.doubleValue(for: .meter())
+        
+        // Add to Memory Dictionary (Super Fast)
+        dailyTotals[dateKey, default: 0.0] += distance
+        
+        // Save the sample reference to use for metadata later
+        // (We overwrite this, so we effectively use the latest sample for metadata)
+        dailyMetadataSamples[dateKey] = sample
+    }
+
+    // 3. DATABASE WRITING: Loop through the DAYS, not the samples
+    // If you had 500 samples for 1 day, this loop runs only 1 TIME.
+    for (dateKey, totalDistance) in dailyTotals {
+        if let metaSample = dailyMetadataSamples[dateKey] {
+            
+            // Call the NEW optimized function
+            let result = updateDailyDistanceInDB(
+                entryDate: dateKey,
+                amountToAdd: totalDistance,
+                sampleMetadata: metaSample
+            )
+            
+            if result != N_SUCCESS {
+                print("Failed to update DB for date: \(dateKey)")
+            }
+        }
+    }
+    
+    print("Batch processing finished.")
+}
+
+static func updateDailyDistanceInDB(entryDate: String, amountToAdd: Double, sampleMetadata: HKQuantitySample) -> Int {
+    
+    // 1. Generate Sync Keys (Same logic as your original code)
+    let utcComps = HealthUtility.utcDateComponents(from: sampleMetadata.startDate)
+    guard
+        let utcYear = utcComps.year,
+        let utcMonth = utcComps.month,
+        let utcDay = utcComps.day,
+        let utcHour = utcComps.hour,
+        let utcMinute = utcComps.minute,
+        let utcSecond = utcComps.second,
+        let syncKey = HealthUtility.getDeviceTime()
+    else {
+        return Int(N_FAILED)
+    }
+    
+    let syncEnt = String(format: "%04d%02d%02d%02d%02d%02d%03d", utcYear, utcMonth, utcDay, utcHour, utcMinute, utcSecond, 0)
+    
+    // 2. OPTIMIZED READ: Check ONLY this specific date
+    // You need to implement 'db.getExistingDistance' to run:
+    // "SELECT distance FROM WalkingData WHERE ENTRY_DATE = ?"
+    let existingDistance = db.getExistingDistance(forDate: entryDate)
+    
+    var result: Int32 = N_FAILED
+    
+    // 3. DECIDE: Update or Insert
+    if existingDistance >= 0 {
+        // --- UPDATE ---
+        let newTotal = existingDistance + amountToAdd
+        
+        if db.update(entryDate,
+                     distance: newTotal,
+                     esmbgSend: 0,
+                     syncKey: syncKey,
+                     syncEnt: syncEnt,
+                     sourceName: sampleMetadata.sourceRevision.source.name,
+                     sourceDeviceName: sampleMetadata.device?.name ?? "",
+                     sourceDeviceSerial: sampleMetadata.device?.hardwareVersion ?? "")
+        {
+            result = N_SUCCESS
+        }
+    } else {
+        // --- INSERT ---
+        // 'existingDistance' was -1 (or nil), so row doesn't exist. Insert the new amount.
+        if db.insert(entryDate,
+                     distance: amountToAdd,
+                     esmbgSend: 0,
+                     deviceId: 0,
+                     subid: 0,
+                     deleteFlag: 0,
+                     syncEnt: syncEnt,
+                     syncKey: syncKey,
+                     sourceName: sampleMetadata.sourceRevision.source.name,
+                     sourceDeviceName: sampleMetadata.device?.name ?? "",
+                     sourceDeviceSerial: sampleMetadata.device?.hardwareVersion ?? "")
+        {
+            result = N_SUCCESS
+        }
+    }
+    
+    return Int(result)
+}

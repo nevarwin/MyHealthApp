@@ -29,9 +29,33 @@
 		970FB2852ED1E48500728041 /* MyHealthAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MyHealthAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		97A06F312ED4A2E8005E7EB0 /* Exceptions for "MyHealthApp" folder in "MyHealthApp" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				GetHealthDifference.text,
+			);
+			target = 970FB26D2ED1E48300728041 /* MyHealthApp */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
+		97A06F322ED4A2E8005E7EB0 /* Exceptions for "MyHealthApp" folder in "Compile Sources" phase from "MyHealthApp" target */ = {
+			isa = PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet;
+			buildPhase = 970FB26A2ED1E48300728041 /* Sources */;
+			membershipExceptions = (
+				GetHealthDifference.text,
+			);
+		};
+/* End PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		970FB2702ED1E48300728041 /* MyHealthApp */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				97A06F312ED4A2E8005E7EB0 /* Exceptions for "MyHealthApp" folder in "MyHealthApp" target */,
+				97A06F322ED4A2E8005E7EB0 /* Exceptions for "MyHealthApp" folder in "Compile Sources" phase from "MyHealthApp" target */,
+			);
 			path = MyHealthApp;
 			sourceTree = "<group>";
 		};
