@@ -307,3 +307,102 @@ static func registerTravelDistance(entryDate: String, amountToAdd: Double, sampl
         
         return Int(result)
     }
+    
+//
+@objc static func registerTravelDistance(_ samples: [HKQuantitySample], in db: accessDB_travelDistance) -> Int {
+    
+    // 1. Guard against empty data
+    if samples.isEmpty { return Int(N_SUCCESS) }
+    
+    // 2. AGGREGATE HEALTHKIT DATA FIRST
+    // We sum up all HealthKit samples by date locally first
+    var hkDailyTotals: [String: Double] = [:]
+    var representativeSamples: [String: HKQuantitySample] = [:]
+    let unit = HKUnit.meter()
+    
+    for sample in samples {
+        let value = sample.quantity.doubleValue(for: unit)
+        let comps = HealthUtility.currentDateComponents(from: sample.startDate)
+        
+        if let year = comps.year, let month = comps.month, let day = comps.day {
+            let entryDate = String(format: "%04d%02d%02d", year, month, day)
+            hkDailyTotals[entryDate, default: 0.0] += value
+            representativeSamples[entryDate] = sample
+        }
+    }
+    
+    // 3. FETCH EXISTING DB DATA
+    // We fetch this ONCE outside the loop to improve performance
+    let allDBData = db.selectDateDatas_dayDB()
+    var dbExistingData: [String: NSDictionary] = [:]
+    
+    // Convert DB array to a Dictionary for fast lookup
+    if let currentDataArray = allDBData as? [NSDictionary] {
+        for data in currentDataArray {
+            if let date = data["ENTRY_DATE"] as? String {
+                dbExistingData[date] = data
+            }
+        }
+    }
+    
+    var result: Int32 = N_FAILED
+    
+    // 4. PROCESS EACH AGGREGATED DATE
+    for (dateStr, hkTotalDistance) in hkDailyTotals {
+        
+        guard let sample = representativeSamples[dateStr] else { continue }
+        
+        // Prepare metadata (Time, Sync keys)
+        let utcComps = HealthUtility.utcDateComponents(from: sample.startDate)
+        guard
+            let utcYear = utcComps.year, let utcMonth = utcComps.month, let utcDay = utcComps.day,
+            let utcHour = utcComps.hour, let utcMinute = utcComps.minute, let utcSecond = utcComps.second,
+            let syncKey = HealthUtility.getDeviceTime()
+        else {
+            continue
+        }
+        
+        let syncEnt = String(format: "%04d%02d%02d%02d%02d%02d%03d", utcYear, utcMonth, utcDay, utcHour, utcMinute, utcSecond, 0)
+
+        // 5. THE PRIORITY CHECK
+        if dbExistingData[dateStr] != nil {
+            // CASE: Data exists (e.g., 5km from Cloud).
+            // LOGIC: PRIORITIZE HEALTHKIT.
+            // We do NOT add (+). We just use 'hkTotalDistance' (3km).
+            
+            print("Conflict found for \(dateStr). Overwriting Cloud data with HealthKit data.")
+            
+            if db.update(
+                withDate: dateStr,
+                distance: hkTotalDistance, // <--- DIRECT OVERWRITE
+                esmbgSend: 0,
+                syncKey: syncKey,
+                syncEnt: syncEnt,
+                sourceName: sample.sourceName,
+                sourceDeviceName: sample.sourceDeviceName,
+                sourceDeviceSerial: sample.sourceDeviceSerial
+            ) {
+                result = N_SUCCESS
+            }
+        } else {
+            // CASE: New Data. Insert normally.
+            if db.insert(
+                withDate: dateStr,
+                distance: hkTotalDistance,
+                esmbgSend: 0,
+                deviceId: 0,
+                subId: 0,
+                deleteFlag: 0,
+                syncEnt: syncEnt,
+                syncKey: syncKey,
+                sourceName: sample.sourceName,
+                sourceDeviceName: sample.sourceDeviceName,
+                sourceDeviceSerial: sample.sourceDeviceSerial
+            ) {
+                result = N_SUCCESS
+            }
+        }
+    }
+    
+    return Int(result)
+}
