@@ -105,7 +105,7 @@ static func setHealthDataToDB_dataArray(_ samples: [HKQuantitySample], type: Hea
     print("Batch processing finished.")
 }
 
-static func updateDailyDistanceInDB(entryDate: String, amountToAdd: Double, sampleMetadata: HKQuantitySample) -> Int {
+static func registerTravelDistance(entryDate: String, amountToAdd: Double, sampleMetadata: HKQuantitySample) -> Int {
     
     // 1. Generate Sync Keys (Same logic as your original code)
     let utcComps = HealthUtility.utcDateComponents(from: sampleMetadata.startDate)
@@ -167,3 +167,58 @@ static func updateDailyDistanceInDB(entryDate: String, amountToAdd: Double, samp
     
     return Int(result)
 }
+
+//
+@objc static func registerTravelDistance(_ distanceWalkingRunning: HKQuantitySample, in db: accessDB_travelDistance) -> Int {
+        
+        var dailyTotals: [String: Double] = [:]
+        var result: Int32 = N_FAILED
+        let unit = HKUnit.meter()
+        let valueTravelDistance = distanceWalkingRunning.quantity.doubleValue(for: unit)
+        
+        let comps = HealthUtility.currentDateComponents(from: distanceWalkingRunning.startDate)
+        let utcComps = HealthUtility.utcDateComponents(from: distanceWalkingRunning.startDate)
+        
+        guard
+            let year = comps.year,
+            let month = comps.month,
+            let day = comps.day,
+            let utcYear = utcComps.year,
+            let utcMonth = utcComps.month,
+            let utcDay = utcComps.day,
+            let utcHour = utcComps.hour,
+            let utcMinute = utcComps.minute,
+            let utcSecond = utcComps.second
+        else {
+            return Int(N_OVER_MAX_VALUE)
+        }
+        
+        guard let syncKey = HealthUtility.getDeviceTime() else {
+            print("Error: Could not get a valid device time.")
+            return Int(N_FAILED)
+        }
+        let syncEnt = String(format: "%04d%02d%02d%02d%02d%02d%03d", utcYear, utcMonth, utcDay, utcHour, utcMinute, utcSecond, 0)
+        let entryDate = String(format: "%04d%02d%02d", year, month, day)
+        
+        dailyTotals[entryDate, default: 0.0] += valueTravelDistance
+        print("dailyTotals: ",dailyTotals)
+        for (dateStr, totalDistance) in dailyTotals {
+            if db.insert(
+                withDate: dateStr,
+                distance: totalDistance,
+                esmbgSend: 0,
+                deviceId: 0,
+                subId: 0,
+                deleteFlag: 0,
+                syncEnt: syncEnt,
+                syncKey: syncKey,
+                sourceName: distanceWalkingRunning.sourceName,
+                sourceDeviceName: distanceWalkingRunning.sourceDeviceName,
+                sourceDeviceSerial: distanceWalkingRunning.sourceDeviceSerial
+            ) {
+                result = N_SUCCESS
+            }
+        }
+        
+        return Int(result)
+    }
