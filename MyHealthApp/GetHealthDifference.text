@@ -309,11 +309,17 @@ static func registerTravelDistance(entryDate: String, amountToAdd: Double, sampl
     }
     
 //
-@objc static func registerTravelDistance(_ samples: [HKQuantitySample], in db: accessDB_travelDistance) -> Int {
-    
+@objc static func registerTravelDistance(_ rawSamples: [Any], in db: accessDB_travelDistance) -> Int {
+        
     // 1. Guard against empty data
-    if samples.isEmpty { return Int(N_SUCCESS) }
+    guard let samples = rawSamples as? [HKQuantitySample] else {
+        print("Error: Passed array did not contain HKQuantitySamples")
+        return Int(N_FAILED)
+    }
     
+    // 3. Guard against empty data
+    if samples.isEmpty { return Int(N_SUCCESS) }
+
     // 2. AGGREGATE HEALTHKIT DATA FIRST
     // We sum up all HealthKit samples by date locally first
     var hkDailyTotals: [String: Double] = [:]
@@ -406,3 +412,177 @@ static func registerTravelDistance(entryDate: String, amountToAdd: Double, sampl
     
     return Int(result)
 }
+
+//
+@objc func getHealthDifferenceTravelDistanceData(_ completion: (() -> Void)?) {
+        guard let quantityType = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) else {
+            assertionFailure("HealthKit type identifier is invalid.")
+            completion?()
+            return
+        }
+        
+        let anchoredObjectQuery = HKAnchoredObjectQuery(type: quantityType, predicate: nil, anchor: self.walkingAnchor, limit: HKObjectQueryNoLimit) { [weak self] (query, samples, deletedObjects, anchor, error) in
+            
+            guard let self = self else { return }
+            
+            if let error = error {
+                print("[TRAVEL DISTANCE][ERROR]", error.localizedDescription)
+                DispatchQueue.main.async { completion?() }
+                return
+            }
+            
+            var affectedDates = Set<Date>()
+            let calendar = Calendar.current
+            var samplesByDate: [Date: HKQuantitySample] = [:]
+            
+            if let samples = samples as? [HKQuantitySample] {
+                for sample in samples {
+                    let startOfDay = calendar.startOfDay(for: sample.startDate)
+                    affectedDates.insert(startOfDay)
+                    samplesByDate[startOfDay] = sample
+                }
+            }
+            
+            if affectedDates.isEmpty {
+                print("No new distance samples.")
+                if let newAnchor = anchor { self.walkingAnchor = newAnchor }
+                DispatchQueue.main.async { completion?() }
+                return
+            }
+            
+            let group = DispatchGroup()
+            var dailyTotals: [HKQuantitySample] = []
+            let dataLock = NSLock()
+            
+            for date in affectedDates {
+                group.enter()
+                
+                let nextDay = calendar.date(byAdding: .day, value: 1, to: date)!
+                let predicate = HKQuery.predicateForSamples(withStart: date, end: nextDay, options: .strictStartDate)
+                
+                let statsQuery = HKStatisticsQuery(quantityType: quantityType, quantitySamplePredicate: predicate, options: .cumulativeSum) { _, result, _ in
+                    
+                    defer { group.leave() }
+                    
+                    guard let result = result, let sum = result.sumQuantity() else { return }
+                    
+                    let templateSample = samplesByDate[date]
+                    
+                    let startDateToUse = templateSample?.startDate ?? date
+                    let endDateToUse = templateSample?.endDate ?? date
+                    
+                    let metadataToPreserve = templateSample?.metadata
+                    let deviceToPreserve = templateSample?.device
+                    
+                    let totalSample = HKQuantitySample(
+                        type: quantityType,
+                        quantity: sum,
+                        start: startDateToUse,
+                        end: endDateToUse,
+                        device: deviceToPreserve,
+                        metadata: metadataToPreserve
+                    )
+                    print("totalSample: ", totalSample)
+                    
+                    dataLock.lock()
+                    dailyTotals.append(totalSample)
+                    dataLock.unlock()
+                }
+                
+                HealthUtility.store.execute(statsQuery)
+            }
+            
+            group.notify(queue: .main) {
+                if !dailyTotals.isEmpty {
+                    HealthUtility.setHealthDatasToDB_dataArray(dailyTotals, type: .TRAVEL_DISTANCE)
+                }
+                
+                if let newAnchor = anchor {
+                    self.walkingAnchor = newAnchor
+                }
+                
+                print("[TRAVEL DISTANCE] finished. Processed \(dailyTotals.count) days.")
+                completion?()
+            }
+        }
+        
+        HealthUtility.store.execute(anchoredObjectQuery)
+    }
+    
+    @objc static func registerTravelDistance(_ distanceWalkingRunning: HKQuantitySample, in db: accessDB_travelDistance) -> Int {
+        
+        let unit = HKUnit.meter()
+        let valueTravelDistance = distanceWalkingRunning.quantity.doubleValue(for: unit)
+        
+        let comps = HealthUtility.currentDateComponents(from: distanceWalkingRunning.startDate)
+        let utcComps = HealthUtility.utcDateComponents(from: distanceWalkingRunning.startDate)
+        
+        guard
+            let year = comps.year,
+            let month = comps.month,
+            let day = comps.day,
+            let utcYear = utcComps.year,
+            let utcMonth = utcComps.month,
+            let utcDay = utcComps.day,
+            let utcHour = utcComps.hour,
+            let utcMinute = utcComps.minute,
+            let utcSecond = utcComps.second
+        else {
+            return Int(N_OVER_MAX_VALUE)
+        }
+        
+        guard let syncKey = HealthUtility.getDeviceTime() else {
+            print("Error: Could not get a valid device time.")
+            return Int(N_FAILED)
+        }
+        let syncEnt = String(format: "%04d%02d%02d%02d%02d%02d%03d", utcYear, utcMonth, utcDay, utcHour, utcMinute, utcSecond, 0)
+        let entryDate = String(format: "%04d%02d%02d", year, month, day)
+        
+        let allData = db.selectDateDatas_dayDB()
+        var existingEntry: NSDictionary? = nil
+        
+        if let currentDataArray = allData as? [NSDictionary] {
+            for data in currentDataArray {
+                if let currentEntryDate = data["ENTRY_DATE"] as? String, currentEntryDate == entryDate {
+                    existingEntry = data
+                    break
+                }
+            }
+        }
+        
+        var result: Int32 = N_FAILED
+        
+        if existingEntry != nil {
+            if db.update(
+                withDate:entryDate,
+                distance: valueTravelDistance,
+                esmbgSend: 0,
+                syncKey: syncKey,
+                syncEnt: syncEnt,
+                sourceName: distanceWalkingRunning.sourceName,
+                sourceDeviceName: distanceWalkingRunning.sourceDeviceName,
+                sourceDeviceSerial: distanceWalkingRunning.sourceDeviceSerial
+            ) {
+                result = N_SUCCESS
+            }
+            
+        } else {
+            if db.insert(
+                withDate: entryDate,
+                distance: valueTravelDistance,
+                esmbgSend: 0,
+                deviceId: 0,
+                subId: 0,
+                deleteFlag: 0,
+                syncEnt: syncEnt,
+                syncKey: syncKey,
+                sourceName: distanceWalkingRunning.sourceName,
+                sourceDeviceName: distanceWalkingRunning.sourceDeviceName,
+                sourceDeviceSerial: distanceWalkingRunning.sourceDeviceSerial
+            ) {
+                result = N_SUCCESS
+            }
+        }
+        
+        return Int(result)
+    }
