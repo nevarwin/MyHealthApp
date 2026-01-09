@@ -30,7 +30,7 @@ struct ContentView: View {
                         
                         // The Permission Button inside the cell
                         Button("Authorize") {
-                            hkManager.requestAuthorization()
+                            hkManager.distanceWalkingRunningAuthorization()
                         }
                         .buttonStyle(.bordered)
                         .tint(.blue)
@@ -40,6 +40,36 @@ struct ContentView: View {
                     }
                     .padding(.vertical, 8)
                 }
+                
+                    HStack {
+                        Button(action: {
+                            hkManager.triggerDummyDataInsertion()
+                        }){
+                            Image(systemName: "figure.walk")
+                                .foregroundColor(.orange)
+                                .imageScale(.large)
+                        }
+                        Text("Steps")
+                            .font(.subheadline)
+                        
+                        Spacer()
+                        
+                        // The Permission Button inside the cell
+                        Button("Authorize") {
+                            hkManager.requestHealthAuthorization { success in
+                                print("Authorization result: \(success)")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.blue)
+                        // .buttonStyle(.borderless) is important here!
+                        // Without it, clicking the button triggers the NavigationLink
+                        .buttonStyle(.borderless)
+                        
+                    }
+                    .padding(.vertical, 8)
+                
+                
             }
             .navigationTitle("Health Dashboard")
         }
