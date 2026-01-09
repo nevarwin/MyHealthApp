@@ -171,7 +171,7 @@ class HealthKitManager: ObservableObject {
     }
     
     // MARK: - 0. Steps
-    private func insertDummyStepsData(startYear: Int = 2018, endYear: Int = 2022) {
+    private func insertDummyStepsData(startYear: Int = 2018, endYear: Int = 2020) {
         guard let type = HKQuantityType.quantityType(forIdentifier: .stepCount) else {
             print("Could not create step count type")
             return
@@ -212,7 +212,7 @@ class HealthKitManager: ObservableObject {
     }
     
     // MARK: - 1. Weight (Body Mass)
-    private func insertDummyWeightData(startYear: Int = 2018, endYear: Int = 2022) {
+    private func insertDummyWeightData(startYear: Int = 2018, endYear: Int = 2020) {
         guard let type = HKQuantityType.quantityType(forIdentifier: .bodyMass) else { return }
         
         let calendar = Calendar.current
@@ -239,7 +239,7 @@ class HealthKitManager: ObservableObject {
     }
     
     // MARK: - 2. Body Temperature
-    private func insertDummyTemperatureData(startYear: Int = 2018, endYear: Int = 2022) {
+    private func insertDummyTemperatureData(startYear: Int = 2018, endYear: Int = 2020) {
         guard let type = HKQuantityType.quantityType(forIdentifier: .bodyTemperature) else { return }
         
         let calendar = Calendar.current
@@ -266,7 +266,7 @@ class HealthKitManager: ObservableObject {
     }
     
     // MARK: - 3. Oxygen Saturation
-    private func insertDummyO2Data(startYear: Int = 2018, endYear: Int = 2022) {
+    private func insertDummyO2Data(startYear: Int = 2018, endYear: Int = 2020) {
         guard let type = HKQuantityType.quantityType(forIdentifier: .oxygenSaturation) else { return }
         
         let calendar = Calendar.current
@@ -292,7 +292,7 @@ class HealthKitManager: ObservableObject {
     }
     
     // MARK: - 4. Blood Pressure (Correlation)
-    private func insertDummyBloodPressureData(startYear: Int = 2018, endYear: Int = 2022) {
+    private func insertDummyBloodPressureData(startYear: Int = 2018, endYear: Int = 2020) {
         guard let systolicType = HKQuantityType.quantityType(forIdentifier: .bloodPressureSystolic),
               let diastolicType = HKQuantityType.quantityType(forIdentifier: .bloodPressureDiastolic),
               let correlationType = HKCorrelationType.correlationType(forIdentifier: .bloodPressure) else {
@@ -337,7 +337,7 @@ class HealthKitManager: ObservableObject {
     }
     
     // MARK: - 5. Blood Glucose
-    private func insertDummyBloodGlucoseData(startYear: Int = 2018, endYear: Int = 2022) {
+    private func insertDummyBloodGlucoseData(startYear: Int = 2018, endYear: Int = 2020) {
         guard let type = HKQuantityType.quantityType(forIdentifier: .bloodGlucose) else { return }
         
         let calendar = Calendar.current
