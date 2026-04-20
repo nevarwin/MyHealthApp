@@ -128,11 +128,13 @@ class HealthKitManager: ObservableObject {
         guard let bpSystolic = HKQuantityType.quantityType(forIdentifier: .bloodPressureSystolic) else { print("FAIL: BP Sys Type"); return }
         guard let bpDiastolic = HKQuantityType.quantityType(forIdentifier: .bloodPressureDiastolic) else { print("FAIL: BP Dia Type"); return }
         guard let glucoseType = HKQuantityType.quantityType(forIdentifier: .bloodGlucose) else { print("FAIL: Glucose Type"); return }
+        guard let distanceType = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) else { print("FAIL: Distance Type"); return }
+        guard let heartRateType = HKQuantityType.quantityType(forIdentifier: .heartRate) else { print("FAIL: Heart Rate Type"); return }
         
         print("STEP 3: All Types Created")
         
-        let typesToShare: Set<HKSampleType> = [stepsType, weightType, tempType, o2Type, bpSystolic, bpDiastolic, glucoseType]
-        let typesToRead: Set<HKObjectType> = [stepsType, weightType, tempType, o2Type, bpSystolic, bpDiastolic, glucoseType]
+        let typesToShare: Set<HKSampleType> = [stepsType, weightType, tempType, o2Type, bpSystolic, bpDiastolic, glucoseType, distanceType, heartRateType]
+        let typesToRead: Set<HKObjectType> = [stepsType, weightType, tempType, o2Type, bpSystolic, bpDiastolic, glucoseType, distanceType, heartRateType]
         
         print("STEP 4: About to call requestAuthorization")
         
@@ -209,13 +211,19 @@ class HealthKitManager: ObservableObject {
                 self?.insertDummyBloodGlucoseData()
                 print("DEBUG: Blood Glucose insertion executed.")
                 
+                self?.insertDummyDistanceWalkingRunningData()
+                print("DEBUG: Distance Walking/Running insertion executed.")
+                
+                self?.insertDummyHeartRateData()
+                print("DEBUG: Heart Rate insertion executed.")
+                
                 print("DEBUG: All dummy data insertion tasks finished.")
             }
         }
     }
     
     // MARK: - 0. Steps
-    private func insertDummyStepsData(startYear: Int = 2018, endYear: Int = 2022) {
+    private func insertDummyStepsData(startYear: Int = 2023, endYear: Int = 2025) {
         guard let type = HKQuantityType.quantityType(forIdentifier: .stepCount) else {
             print("Could not create step count type")
             return
@@ -256,7 +264,7 @@ class HealthKitManager: ObservableObject {
     }
     
     // MARK: - 1. Weight (Body Mass)
-    private func insertDummyWeightData(startYear: Int = 2018, endYear: Int = 2020) {
+    private func insertDummyWeightData(startYear: Int = 2023, endYear: Int = 2025) {
         guard let type = HKQuantityType.quantityType(forIdentifier: .bodyMass) else { return }
         
         let calendar = Calendar.current
@@ -283,7 +291,7 @@ class HealthKitManager: ObservableObject {
     }
     
     // MARK: - 2. Body Temperature
-    private func insertDummyTemperatureData(startYear: Int = 2018, endYear: Int = 2020) {
+    private func insertDummyTemperatureData(startYear: Int = 2023, endYear: Int = 2025) {
         guard let type = HKQuantityType.quantityType(forIdentifier: .bodyTemperature) else { return }
         
         let calendar = Calendar.current
@@ -310,7 +318,7 @@ class HealthKitManager: ObservableObject {
     }
     
     // MARK: - 3. Oxygen Saturation
-    private func insertDummyO2Data(startYear: Int = 2018, endYear: Int = 2020) {
+    private func insertDummyO2Data(startYear: Int = 2023, endYear: Int = 2025) {
         guard let type = HKQuantityType.quantityType(forIdentifier: .oxygenSaturation) else { return }
         
         let calendar = Calendar.current
@@ -336,7 +344,7 @@ class HealthKitManager: ObservableObject {
     }
     
     // MARK: - 4. Blood Pressure (Correlation)
-    private func insertDummyBloodPressureData(startYear: Int = 2018, endYear: Int = 2020) {
+    private func insertDummyBloodPressureData(startYear: Int = 2023, endYear: Int = 2025) {
         guard let systolicType = HKQuantityType.quantityType(forIdentifier: .bloodPressureSystolic),
               let diastolicType = HKQuantityType.quantityType(forIdentifier: .bloodPressureDiastolic),
               let correlationType = HKCorrelationType.correlationType(forIdentifier: .bloodPressure) else {
@@ -381,7 +389,7 @@ class HealthKitManager: ObservableObject {
     }
     
     // MARK: - 5. Blood Glucose
-    private func insertDummyBloodGlucoseData(startYear: Int = 2018, endYear: Int = 2020) {
+    private func insertDummyBloodGlucoseData(startYear: Int = 2023, endYear: Int = 2025) {
         guard let type = HKQuantityType.quantityType(forIdentifier: .bloodGlucose) else { return }
         
         let calendar = Calendar.current
@@ -407,6 +415,60 @@ class HealthKitManager: ObservableObject {
         healthStore.save(samplesToSave) { success, error in
             if let error = error { print("Error saving Glucose: \(error)") }
             else { print("Saved \(samplesToSave.count) Glucose samples") }
+        }
+    }
+    
+    // MARK: - 6. Distance Walking/Running
+    private func insertDummyDistanceWalkingRunningData(startYear: Int = 2023, endYear: Int = 2025) {
+        guard let type = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) else { return }
+        
+        let calendar = Calendar.current
+        var currentDate = calendar.date(from: DateComponents(year: startYear, month: 1, day: 1))!
+        let endDate = calendar.date(from: DateComponents(year: endYear, month: 12, day: 31))!
+        var samplesToSave: [HKQuantitySample] = []
+        
+        while currentDate <= endDate {
+            // Random distance between 500m and 5000m
+            let randomDistance = Double.random(in: 500...5000)
+            let quantity = HKQuantity(unit: .meter(), doubleValue: randomDistance)
+            
+            let sample = HKQuantitySample(type: type, quantity: quantity, start: currentDate, end: currentDate)
+            samplesToSave.append(sample)
+            
+            currentDate = calendar.date(byAdding: .day, value: 1, to: currentDate)!
+        }
+        
+        healthStore.save(samplesToSave) { success, error in
+            if let error = error { print("Error saving Distance: \(error)") }
+            else { print("Saved \(samplesToSave.count) Distance samples") }
+        }
+    }
+    
+    // MARK: - 7. Heart Rate
+    private func insertDummyHeartRateData(startYear: Int = 2023, endYear: Int = 2025) {
+        guard let type = HKQuantityType.quantityType(forIdentifier: .heartRate) else { return }
+        
+        let calendar = Calendar.current
+        var currentDate = calendar.date(from: DateComponents(year: startYear, month: 1, day: 1))!
+        let endDate = calendar.date(from: DateComponents(year: endYear, month: 12, day: 31))!
+        var samplesToSave: [HKQuantitySample] = []
+        
+        let unit = HKUnit.count().unitDivided(by: .minute())
+        
+        while currentDate <= endDate {
+            // Random Heart Rate between 60 and 100 bpm
+            let randomHR = Double.random(in: 60...100)
+            let quantity = HKQuantity(unit: unit, doubleValue: randomHR)
+            
+            let sample = HKQuantitySample(type: type, quantity: quantity, start: currentDate, end: currentDate)
+            samplesToSave.append(sample)
+            
+            currentDate = calendar.date(byAdding: .day, value: 1, to: currentDate)!
+        }
+        
+        healthStore.save(samplesToSave) { success, error in
+            if let error = error { print("Error saving Heart Rate: \(error)") }
+            else { print("Saved \(samplesToSave.count) Heart Rate samples") }
         }
     }
 }
