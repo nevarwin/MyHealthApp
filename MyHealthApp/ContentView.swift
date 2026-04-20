@@ -45,11 +45,11 @@ struct ContentView: View {
                         Button(action: {
                             hkManager.triggerDummyDataInsertion()
                         }){
-                            Image(systemName: "figure.walk")
+                            Image(systemName: "cylinder.split.1x2")
                                 .foregroundColor(.orange)
                                 .imageScale(.large)
                         }
-                        Text("Steps")
+                        Text("All data")
                             .font(.subheadline)
                         
                         Spacer()
@@ -72,6 +72,16 @@ struct ContentView: View {
                 
             }
             .navigationTitle("Health Dashboard")
+            .alert("Health Access Required", isPresented: $hkManager.showSettingsAlert) {
+                Button("Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("Authorization was previously denied. Please enable Health access in Settings to use this feature.")
+            }
         }
     }
 }

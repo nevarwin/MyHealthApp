@@ -16,6 +16,7 @@ class HealthKitManager: ObservableObject {
     @Published var walks: [WalkData] = []
     @Published var isFetching = false
     @Published var isStepsAuthorized = false
+    @Published var showSettingsAlert = false
     
     private var anchor: HKQueryAnchor?
     private let anchorKey = "walking_anchor" // Key for UserDefaults
@@ -135,8 +136,16 @@ class HealthKitManager: ObservableObject {
         
         print("STEP 4: About to call requestAuthorization")
         
-        healthStore.requestAuthorization(toShare: typesToShare, read: typesToRead) { (success, error) in
+        healthStore.requestAuthorization(toShare: typesToShare, read: typesToRead) { [weak self] (success, error) in
             print("STEP 5: Callback received inside closure")
+            guard let self = self else { return }
+            
+            if !success {
+                print("Authorization failed or was cancelled. Prompting again...")
+                // Recursive call to "prompt again" if the user cancelled
+                self.requestHealthAuthorization(completion: completion)
+                return
+            }
             
             if let error = error {
                 print("ERROR: \(error.localizedDescription)")
@@ -144,12 +153,17 @@ class HealthKitManager: ObservableObject {
                 return
             }
             
+            let status = self.healthStore.authorizationStatus(for: stepsType)
+            
             DispatchQueue.main.async {
-                // self.isHealthAuthorized = success
+                self.isStepsAuthorized = (status == .sharingAuthorized)
+                if status == .sharingDenied {
+                    self.showSettingsAlert = true
+                }
             }
             
-            print("Authorization result: \(success)")
-            completion(success)
+            print("Authorization status for steps: \(status.rawValue)")
+            completion(status == .sharingAuthorized)
         }
         
         print("STEP 6: Code execution continued after requestAuthorization call (waiting for callback)")
