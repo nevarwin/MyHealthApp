@@ -110,68 +110,98 @@ class HealthKitManager: ObservableObject {
     }
     // MARK: - Authorization
     func requestHealthAuthorization(completion: @escaping (Bool) -> Void) {
+        print("STEP 1: Function started")
+        
         guard HKHealthStore.isHealthDataAvailable() else {
-            print("HealthKit is not available on this device")
+            print("ERROR: HealthKit not available")
             completion(false)
             return
         }
+        print("STEP 2: HealthKit is available")
         
-        // 1. Define the types we want to Write (Share) and Read
-        guard let stepsType = HKQuantityType.quantityType(forIdentifier: .stepCount),
-              let weightType = HKQuantityType.quantityType(forIdentifier: .bodyMass),
-              let tempType = HKQuantityType.quantityType(forIdentifier: .bodyTemperature),
-              let o2Type = HKQuantityType.quantityType(forIdentifier: .oxygenSaturation),
-              let bpSystolic = HKQuantityType.quantityType(forIdentifier: .bloodPressureSystolic),
-              let bpDiastolic = HKQuantityType.quantityType(forIdentifier: .bloodPressureDiastolic),
-              let glucoseType = HKQuantityType.quantityType(forIdentifier: .bloodGlucose) else {
-            
-            print("Unable to get HealthKit types")
-            completion(false)
-            return
-        }
+        // Check types individually to ensure none are failing
+        guard let stepsType = HKQuantityType.quantityType(forIdentifier: .stepCount) else { print("FAIL: Steps Type"); return }
+        guard let weightType = HKQuantityType.quantityType(forIdentifier: .bodyMass) else { print("FAIL: Weight Type"); return }
+        guard let tempType = HKQuantityType.quantityType(forIdentifier: .bodyTemperature) else { print("FAIL: Temp Type"); return }
+        guard let o2Type = HKQuantityType.quantityType(forIdentifier: .oxygenSaturation) else { print("FAIL: O2 Type"); return }
+        guard let bpSystolic = HKQuantityType.quantityType(forIdentifier: .bloodPressureSystolic) else { print("FAIL: BP Sys Type"); return }
+        guard let bpDiastolic = HKQuantityType.quantityType(forIdentifier: .bloodPressureDiastolic) else { print("FAIL: BP Dia Type"); return }
+        guard let glucoseType = HKQuantityType.quantityType(forIdentifier: .bloodGlucose) else { print("FAIL: Glucose Type"); return }
         
-        // Note: For Blood Pressure, we authorize the individual quantity types (Systolic/Diastolic)
+        print("STEP 3: All Types Created")
+        
         let typesToShare: Set<HKSampleType> = [stepsType, weightType, tempType, o2Type, bpSystolic, bpDiastolic, glucoseType]
         let typesToRead: Set<HKObjectType> = [stepsType, weightType, tempType, o2Type, bpSystolic, bpDiastolic, glucoseType]
         
+        print("STEP 4: About to call requestAuthorization")
+        
         healthStore.requestAuthorization(toShare: typesToShare, read: typesToRead) { (success, error) in
+            print("STEP 5: Callback received inside closure")
+            
             if let error = error {
-                print("HealthKit Authorization Error: \(error.localizedDescription)")
+                print("ERROR: \(error.localizedDescription)")
                 completion(false)
                 return
             }
             
             DispatchQueue.main.async {
-                // Assuming you have a general authorized state or specific ones
                 // self.isHealthAuthorized = success
             }
             
-            print("HealthKit Authorization: \(success ? "Granted" : "Denied")")
+            print("Authorization result: \(success)")
             completion(success)
         }
+        
+        print("STEP 6: Code execution continued after requestAuthorization call (waiting for callback)")
     }
     
     // MARK: - Dummy Data Insertion Helper
     // Helper to ensure auth exists before inserting
     func triggerDummyDataInsertion() {
+        print("DEBUG: Requesting HealthKit authorization...")
+        
         requestHealthAuthorization { [weak self] success in
-            guard success else { return }
+            guard success else {
+                // Error Log: Critical failure point
+                print("ERROR: HealthKit authorization failed or was denied by user. Data insertion aborted.")
+                return
+            }
+            
+            print("DEBUG: Authorization granted. Proceeding to background queue.")
             
             // Run insertions on a background queue to avoid blocking UI
             let queue = DispatchQueue.global(qos: .userInitiated)
             queue.async {
+                print("DEBUG: Starting batch insertion operations...")
+                
+                // Note: Since these methods are called sequentially, we log as we go
+                // to identify which specific operation might be causing issues if the app crashes.
+                
                 self?.insertDummyStepsData()
+                print("DEBUG: Steps insertion executed.")
+                
                 self?.insertDummyWeightData()
+                print("DEBUG: Weight insertion executed.")
+                
                 self?.insertDummyTemperatureData()
+                print("DEBUG: Temperature insertion executed.")
+                
                 self?.insertDummyO2Data()
+                print("DEBUG: Oxygen Saturation insertion executed.")
+                
                 self?.insertDummyBloodPressureData()
+                print("DEBUG: Blood Pressure insertion executed.")
+                
                 self?.insertDummyBloodGlucoseData()
+                print("DEBUG: Blood Glucose insertion executed.")
+                
+                print("DEBUG: All dummy data insertion tasks finished.")
             }
         }
     }
     
     // MARK: - 0. Steps
-    private func insertDummyStepsData(startYear: Int = 2018, endYear: Int = 2020) {
+    private func insertDummyStepsData(startYear: Int = 2018, endYear: Int = 2022) {
         guard let type = HKQuantityType.quantityType(forIdentifier: .stepCount) else {
             print("Could not create step count type")
             return
