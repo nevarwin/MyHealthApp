@@ -172,6 +172,57 @@ class HealthKitManager: ObservableObject {
     }
     
     // MARK: - Dummy Data Insertion Helper
+    
+    /// Object types this app may write via dummy / stress-test flows. Used to clear prior app-written samples before a fresh import.
+    /// HealthKit only allows deleting samples created by this app (not all Health data on the device).
+    private func objectTypesForDummyDataWipe() -> [HKObjectType] {
+        var types: [HKObjectType] = []
+        let quantityIDs: [HKQuantityTypeIdentifier] = [
+            .stepCount, .bodyMass, .bodyTemperature, .oxygenSaturation, .bloodGlucose,
+            .distanceWalkingRunning, .heartRate, .bloodPressureSystolic, .bloodPressureDiastolic
+        ]
+        for id in quantityIDs {
+            if let t = HKQuantityType.quantityType(forIdentifier: id) {
+                types.append(t)
+            }
+        }
+        if let bp = HKCorrelationType.correlationType(forIdentifier: .bloodPressure) {
+            types.append(bp)
+        }
+        return types
+    }
+    
+    /// Deletes all samples of the given types that this app is allowed to remove (typically those this app saved), across all time.
+    private func deleteAllSamplesForDummyImportTypesThenRun(
+        completion: @escaping () -> Void
+    ) {
+        let types = objectTypesForDummyDataWipe()
+        let predicate = HKQuery.predicateForSamples(
+            withStart: .distantPast,
+            end: .distantFuture,
+            options: []
+        )
+        
+        func deleteNext(index: Int) {
+            if index >= types.count {
+                completion()
+                return
+            }
+            let objectType = types[index]
+            healthStore.deleteObjects(of: objectType, predicate: predicate) { success, deletedCount, error in
+                if let error = error {
+                    print("DEBUG: Delete \(objectType) — error: \(error.localizedDescription)")
+                } else {
+                    print("DEBUG: Delete \(objectType) — success=\(success), removed=\(deletedCount)")
+                }
+                deleteNext(index: index + 1)
+            }
+        }
+        
+        print("DEBUG: Wiping prior app-written samples for dummy-related types (\(types.count) object types)...")
+        deleteNext(index: 0)
+    }
+    
     // Helper to ensure auth exists before inserting
     func triggerDummyDataInsertion() {
         print("DEBUG: Requesting HealthKit authorization...")
@@ -188,36 +239,39 @@ class HealthKitManager: ObservableObject {
             // Run insertions on a background queue to avoid blocking UI
             let queue = DispatchQueue.global(qos: .userInitiated)
             queue.async {
-                print("DEBUG: Starting batch insertion operations...")
-                
-                // Note: Since these methods are called sequentially, we log as we go
-                // to identify which specific operation might be causing issues if the app crashes.
-                
-//                self?.insertDummyStepsData()
-//                print("DEBUG: Steps insertion executed.")
+                guard let self else { return }
+                self.deleteAllSamplesForDummyImportTypesThenRun {
+                    print("DEBUG: Starting batch insertion operations...")
+                    
+                    // Note: Since these methods are called sequentially, we log as we go
+                    // to identify which specific operation might be causing issues if the app crashes.
+                    
+//                    self.insertDummyStepsData()
+//                    print("DEBUG: Steps insertion executed.")
 //
-//                self?.insertDummyWeightData()
-//                print("DEBUG: Weight insertion executed.")
+//                    self.insertDummyWeightData()
+//                    print("DEBUG: Weight insertion executed.")
 //
-//                self?.insertDummyTemperatureData()
-//                print("DEBUG: Temperature insertion executed.")
-                
-                self?.insertDummyO2Data()
-                print("DEBUG: Oxygen Saturation insertion executed.")
-                
-//                self?.insertDummyBloodPressureData()
-//                print("DEBUG: Blood Pressure insertion executed.")
+//                    self.insertDummyTemperatureData()
+//                    print("DEBUG: Temperature insertion executed.")
+                    
+                    self.insertDummyO2Data()
+                    print("DEBUG: Oxygen Saturation insertion executed.")
+                    
+//                    self.insertDummyBloodPressureData()
+//                    print("DEBUG: Blood Pressure insertion executed.")
 //
-//                self?.insertDummyBloodGlucoseData()
-//                print("DEBUG: Blood Glucose insertion executed.")
+//                    self.insertDummyBloodGlucoseData()
+//                    print("DEBUG: Blood Glucose insertion executed.")
 //
-//                self?.insertDummyDistanceWalkingRunningData()
-//                print("DEBUG: Distance Walking/Running insertion executed.")
-                
-                self?.insertDummyHeartRateData()
-                print("DEBUG: Heart Rate insertion executed.")
-                
-                print("DEBUG: All dummy data insertion tasks finished.")
+//                    self.insertDummyDistanceWalkingRunningData()
+//                    print("DEBUG: Distance Walking/Running insertion executed.")
+                    
+                    self.insertDummyHeartRateData()
+                    print("DEBUG: Heart Rate insertion executed.")
+                    
+                    print("DEBUG: All dummy data insertion tasks finished.")
+                }
             }
         }
     }
@@ -239,19 +293,21 @@ class HealthKitManager: ObservableObject {
             let queue = DispatchQueue.global(qos: .userInitiated)
             queue.async { [weak self] in
                 guard let self else { return }
-                let anchor = Date()
-                let (spO2Dates, windowStart, _) = self.stressTestSpO2Window(spanYears: spO2SpanYears, spO2Count: spO2SampleCount, windowEnd: anchor)
-                guard !spO2Dates.isEmpty else {
-                    print("ERROR: Stress test — empty SpO₂ timestamp list; insertion aborted.")
-                    return
+                self.deleteAllSamplesForDummyImportTypesThenRun {
+                    let anchor = Date()
+                    let (spO2Dates, windowStart, _) = self.stressTestSpO2Window(spanYears: spO2SpanYears, spO2Count: spO2SampleCount, windowEnd: anchor)
+                    guard !spO2Dates.isEmpty else {
+                        print("ERROR: Stress test — empty SpO₂ timestamp list; insertion aborted.")
+                        return
+                    }
+                    let hrCount = min(pairedHeartRateCount, spO2Dates.count)
+                    let heartRateDates = self.stressTestEvenlySpacedSubsetDates(from: spO2Dates, subsetCount: hrCount)
+                    print("DEBUG: Stress test — \(spO2Dates.count) SpO₂ from \(windowStart) … \(anchor); \(heartRateDates.count) HR on subset of those timestamps")
+                    self.insertStressTestO2Data(sampleDates: spO2Dates)
+                    print("DEBUG: Stress test SpO₂ save dispatched (chunked).")
+                    self.insertStressTestHeartRateData(sampleDates: heartRateDates)
+                    print("DEBUG: Stress test Heart Rate save dispatched.")
                 }
-                let hrCount = min(pairedHeartRateCount, spO2Dates.count)
-                let heartRateDates = self.stressTestEvenlySpacedSubsetDates(from: spO2Dates, subsetCount: hrCount)
-                print("DEBUG: Stress test — \(spO2Dates.count) SpO₂ from \(windowStart) … \(anchor); \(heartRateDates.count) HR on subset of those timestamps")
-                self.insertStressTestO2Data(sampleDates: spO2Dates)
-                print("DEBUG: Stress test SpO₂ save dispatched (chunked).")
-                self.insertStressTestHeartRateData(sampleDates: heartRateDates)
-                print("DEBUG: Stress test Heart Rate save dispatched.")
             }
         }
     }
