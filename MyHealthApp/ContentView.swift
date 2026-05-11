@@ -69,6 +69,29 @@ struct ContentView: View {
                     }
                     .padding(.vertical, 8)
                 
+                HStack {
+                    Button(action: {
+                        hkManager.triggerStressTestSpO2HeartRateInsertion()
+                    }) {
+                        Image(systemName: "waveform.path.ecg")
+                            .foregroundColor(.orange)
+                            .imageScale(.large)
+                    }
+                    Text("SpO₂ / HR stress test (1k + 50k)")
+                        .font(.subheadline)
+                    
+                    Spacer()
+                    
+                    Button("Authorize") {
+                        hkManager.requestHealthAuthorization { success in
+                            print("Authorization result: \(success)")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.blue)
+                    .buttonStyle(.borderless)
+                }
+                .padding(.vertical, 8)
                 
             }
             .navigationTitle("Health Dashboard")

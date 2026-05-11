@@ -193,31 +193,65 @@ class HealthKitManager: ObservableObject {
                 // Note: Since these methods are called sequentially, we log as we go
                 // to identify which specific operation might be causing issues if the app crashes.
                 
-                self?.insertDummyStepsData()
-                print("DEBUG: Steps insertion executed.")
-                
-                self?.insertDummyWeightData()
-                print("DEBUG: Weight insertion executed.")
-                
-                self?.insertDummyTemperatureData()
-                print("DEBUG: Temperature insertion executed.")
+//                self?.insertDummyStepsData()
+//                print("DEBUG: Steps insertion executed.")
+//
+//                self?.insertDummyWeightData()
+//                print("DEBUG: Weight insertion executed.")
+//
+//                self?.insertDummyTemperatureData()
+//                print("DEBUG: Temperature insertion executed.")
                 
                 self?.insertDummyO2Data()
                 print("DEBUG: Oxygen Saturation insertion executed.")
                 
-                self?.insertDummyBloodPressureData()
-                print("DEBUG: Blood Pressure insertion executed.")
-                
-                self?.insertDummyBloodGlucoseData()
-                print("DEBUG: Blood Glucose insertion executed.")
-                
-                self?.insertDummyDistanceWalkingRunningData()
-                print("DEBUG: Distance Walking/Running insertion executed.")
+//                self?.insertDummyBloodPressureData()
+//                print("DEBUG: Blood Pressure insertion executed.")
+//
+//                self?.insertDummyBloodGlucoseData()
+//                print("DEBUG: Blood Glucose insertion executed.")
+//
+//                self?.insertDummyDistanceWalkingRunningData()
+//                print("DEBUG: Distance Walking/Running insertion executed.")
                 
                 self?.insertDummyHeartRateData()
                 print("DEBUG: Heart Rate insertion executed.")
                 
                 print("DEBUG: All dummy data insertion tasks finished.")
+            }
+        }
+    }
+    
+    /// Inserts `spO2SampleCount` SpO₂ readings evenly from `anchor − spO2SpanYears` through `anchor`, plus `pairedHeartRateCount` heart rate samples on a subset of those exact timestamps (no extra HR filler).
+    func triggerStressTestSpO2HeartRateInsertion(
+        spO2SpanYears: Int = 50,
+        spO2SampleCount: Int = 50_000,
+        pairedHeartRateCount: Int = 1000
+    ) {
+        print("DEBUG: Stress test — requesting HealthKit authorization...")
+        
+        requestHealthAuthorization { [weak self] success in
+            guard success else {
+                print("ERROR: HealthKit authorization failed. Stress test insertion aborted.")
+                return
+            }
+            
+            let queue = DispatchQueue.global(qos: .userInitiated)
+            queue.async { [weak self] in
+                guard let self else { return }
+                let anchor = Date()
+                let (spO2Dates, windowStart, _) = self.stressTestSpO2Window(spanYears: spO2SpanYears, spO2Count: spO2SampleCount, windowEnd: anchor)
+                guard !spO2Dates.isEmpty else {
+                    print("ERROR: Stress test — empty SpO₂ timestamp list; insertion aborted.")
+                    return
+                }
+                let hrCount = min(pairedHeartRateCount, spO2Dates.count)
+                let heartRateDates = self.stressTestEvenlySpacedSubsetDates(from: spO2Dates, subsetCount: hrCount)
+                print("DEBUG: Stress test — \(spO2Dates.count) SpO₂ from \(windowStart) … \(anchor); \(heartRateDates.count) HR on subset of those timestamps")
+                self.insertStressTestO2Data(sampleDates: spO2Dates)
+                print("DEBUG: Stress test SpO₂ save dispatched (chunked).")
+                self.insertStressTestHeartRateData(sampleDates: heartRateDates)
+                print("DEBUG: Stress test Heart Rate save dispatched.")
             }
         }
     }
@@ -337,7 +371,7 @@ class HealthKitManager: ObservableObject {
             currentDate = calendar.date(byAdding: .day, value: 1, to: currentDate)!
         }
         
-        healthStore.save(samplesToSave) { success, error in
+        healthStore.save(samplesToSave) { _, error in
             if let error = error { print("Error saving O2: \(error)") }
             else { print("Saved \(samplesToSave.count) O2 samples") }
         }
@@ -466,9 +500,117 @@ class HealthKitManager: ObservableObject {
             currentDate = calendar.date(byAdding: .day, value: 1, to: currentDate)!
         }
         
-        healthStore.save(samplesToSave) { success, error in
+        healthStore.save(samplesToSave) { _, error in
             if let error = error { print("Error saving Heart Rate: \(error)") }
             else { print("Saved \(samplesToSave.count) Heart Rate samples") }
         }
+    }
+    
+    // MARK: - SpO₂ / Heart rate stress test inserts
+    /// `spO2Count` timestamps spread evenly from `windowEnd - spanYears` through `windowEnd` (single `windowEnd` for the whole stress batch).
+    private func stressTestSpO2Window(spanYears: Int, spO2Count: Int, windowEnd: Date) -> (sampleDates: [Date], windowStart: Date, windowEnd: Date) {
+        let calendar = Calendar.current
+        guard let windowStart = calendar.date(byAdding: .year, value: -spanYears, to: windowEnd) else {
+            return ([], windowEnd, windowEnd)
+        }
+        let span = windowEnd.timeIntervalSince(windowStart)
+        guard spO2Count > 0, span > 0 else { return ([], windowStart, windowEnd) }
+        let denom = Double(max(1, spO2Count - 1))
+        let dates = (0..<spO2Count).map { i in
+            windowStart.addingTimeInterval(span * Double(i) / denom)
+        }
+        return (dates, windowStart, windowEnd)
+    }
+    
+    /// Picks `subsetCount` timestamps from `allDates` at evenly spaced indices (each HR aligns with a real SpO₂ sample time).
+    private func stressTestEvenlySpacedSubsetDates(from allDates: [Date], subsetCount: Int) -> [Date] {
+        guard subsetCount > 0, !allDates.isEmpty else { return [] }
+        let last = allDates.count - 1
+        if subsetCount == 1 { return [allDates[0]] }
+        return (0..<subsetCount).map { i in
+            let idx = Int((Double(last) * Double(i) / Double(subsetCount - 1)).rounded())
+            return allDates[min(max(0, idx), last)]
+        }
+    }
+    
+    private func insertStressTestO2Data(sampleDates: [Date]) {
+        guard let type = HKQuantityType.quantityType(forIdentifier: .oxygenSaturation) else { return }
+        
+        guard !sampleDates.isEmpty else {
+            print("Error saving stress-test O2: empty timeline")
+            return
+        }
+        
+        var samplesToSave: [HKQuantitySample] = []
+        samplesToSave.reserveCapacity(sampleDates.count)
+        
+        for d in sampleDates {
+            let randomO2 = Double.random(in: 0.95...1.0)
+            let quantity = HKQuantity(unit: .percent(), doubleValue: randomO2)
+            samplesToSave.append(HKQuantitySample(type: type, quantity: quantity, start: d, end: d))
+        }
+        
+        saveQuantitySamplesInChunks(samplesToSave) { error in
+            if let error = error { print("Error saving stress-test O2: \(error)") }
+            else { print("Saved \(samplesToSave.count) stress-test O2 samples (chunked)") }
+        }
+    }
+    
+    private func insertStressTestHeartRateData(sampleDates: [Date]) {
+        guard let type = HKQuantityType.quantityType(forIdentifier: .heartRate) else { return }
+        
+        guard !sampleDates.isEmpty else {
+            print("Error saving stress-test Heart Rate: empty timeline")
+            return
+        }
+        
+        let unit = HKUnit.count().unitDivided(by: .minute())
+        var samplesToSave: [HKQuantitySample] = []
+        samplesToSave.reserveCapacity(sampleDates.count)
+        
+        for d in sampleDates {
+            let randomHR = Double.random(in: 60...100)
+            let quantity = HKQuantity(unit: unit, doubleValue: randomHR)
+            samplesToSave.append(HKQuantitySample(type: type, quantity: quantity, start: d, end: d))
+        }
+        
+        healthStore.save(samplesToSave) { saveSucceeded, error in
+            if let error = error { print("Error saving stress-test Heart Rate: \(error)") }
+            else if !saveSucceeded { print("Error saving stress-test Heart Rate: success=false") }
+            else { print("Saved \(samplesToSave.count) stress-test Heart Rate samples (subset of SpO₂ times)") }
+        }
+    }
+    
+    private func saveQuantitySamplesInChunks(_ samples: [HKQuantitySample], chunkSize: Int = 5_000, completion: @escaping (Error?) -> Void) {
+        guard !samples.isEmpty else {
+            completion(nil)
+            return
+        }
+        
+        func saveChunk(at index: Int) {
+            let end = min(index + chunkSize, samples.count)
+            let chunk = Array(samples[index..<end])
+            healthStore.save(chunk) { saveSucceeded, error in
+                if let error = error {
+                    completion(error)
+                    return
+                }
+                if !saveSucceeded {
+                    completion(NSError(
+                        domain: "HealthKit",
+                        code: -1,
+                        userInfo: [NSLocalizedDescriptionKey: "healthStore.save returned success=false for chunk \(index)..<\(end)"]
+                    ))
+                    return
+                }
+                if end >= samples.count {
+                    completion(nil)
+                } else {
+                    saveChunk(at: end)
+                }
+            }
+        }
+        
+        saveChunk(at: 0)
     }
 }
