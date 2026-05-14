@@ -276,9 +276,9 @@ class HealthKitManager: ObservableObject {
         }
     }
     
-    /// Inserts `spO2SampleCount` SpO₂ readings evenly from `anchor − spO2SpanYears` through `anchor`, plus `pairedHeartRateCount` heart rate samples on a subset of those exact timestamps (no extra HR filler).
+    /// Inserts `spO2SampleCount` SpO₂ readings (not “50k days”) inside at most **5 calendar years** ending at `anchor`: samples are split across each day in that window so days carry many readings. Pairs `pairedHeartRateCount` heart rate samples to a subset of those timestamps.
     func triggerStressTestSpO2HeartRateInsertion(
-        spO2SpanYears: Int = 50,
+        spO2SpanYears: Int = 5,
         spO2SampleCount: Int = 50_000,
         pairedHeartRateCount: Int = 1000
     ) {
@@ -563,18 +563,51 @@ class HealthKitManager: ObservableObject {
     }
     
     // MARK: - SpO₂ / Heart rate stress test inserts
-    /// `spO2Count` timestamps spread evenly from `windowEnd - spanYears` through `windowEnd` (single `windowEnd` for the whole stress batch).
+    /// Up to **5 years** of calendar time ending at `windowEnd`. `spO2Count` samples are spread **by day**: each day gets roughly `spO2Count / dayCount` timestamps within that day so the total is still `spO2Count` (dense per-day data, not one sample per day across decades).
     private func stressTestSpO2Window(spanYears: Int, spO2Count: Int, windowEnd: Date) -> (sampleDates: [Date], windowStart: Date, windowEnd: Date) {
         let calendar = Calendar.current
-        guard let windowStart = calendar.date(byAdding: .year, value: -spanYears, to: windowEnd) else {
+        let cappedYears = min(max(1, spanYears), 5)
+        guard let windowStart = calendar.date(byAdding: .year, value: -cappedYears, to: windowEnd) else {
             return ([], windowEnd, windowEnd)
         }
-        let span = windowEnd.timeIntervalSince(windowStart)
-        guard spO2Count > 0, span > 0 else { return ([], windowStart, windowEnd) }
-        let denom = Double(max(1, spO2Count - 1))
-        let dates = (0..<spO2Count).map { i in
-            windowStart.addingTimeInterval(span * Double(i) / denom)
+        guard spO2Count > 0 else { return ([], windowStart, windowEnd) }
+
+        var dayStarts: [Date] = []
+        var d = calendar.startOfDay(for: windowStart)
+        while d <= windowEnd {
+            dayStarts.append(d)
+            guard let nextDay = calendar.date(byAdding: .day, value: 1, to: d) else { break }
+            d = nextDay
         }
+        let numDays = dayStarts.count
+        guard numDays > 0 else { return ([], windowStart, windowEnd) }
+
+        let basePerDay = spO2Count / numDays
+        let extraSamples = spO2Count % numDays
+
+        var dates: [Date] = []
+        dates.reserveCapacity(spO2Count)
+
+        for (dayIndex, dayStart) in dayStarts.enumerated() {
+            let nToday = basePerDay + (dayIndex < extraSamples ? 1 : 0)
+            guard nToday > 0 else { continue }
+
+            guard let dayEndExclusive = calendar.date(byAdding: .day, value: 1, to: dayStart) else { continue }
+            let sliceStart = max(dayStart, windowStart)
+            let sliceEnd = min(dayEndExclusive, windowEnd)
+            let slice = sliceEnd.timeIntervalSince(sliceStart)
+            guard slice > 0 else { continue }
+
+            let denom = Double(max(1, nToday - 1))
+            for i in 0..<nToday {
+                let u = nToday == 1 ? 0.5 : Double(i) / denom
+                // Keep samples strictly inside the clipped day slice so adjacent days do not collide at midnight.
+                let t = sliceStart.addingTimeInterval(slice * (0.001 + u * 0.998))
+                dates.append(t)
+            }
+        }
+
+        dates.sort()
         return (dates, windowStart, windowEnd)
     }
     
