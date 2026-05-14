@@ -193,10 +193,15 @@ class HealthKitManager: ObservableObject {
     }
     
     /// Deletes all samples of the given types that this app is allowed to remove (typically those this app saved), across all time.
-    private func deleteAllSamplesForDummyImportTypesThenRun(
+    private func deleteAllSamplesForTypesThenRun(
+        _ types: [HKObjectType],
         completion: @escaping () -> Void
     ) {
-        let types = objectTypesForDummyDataWipe()
+        guard !types.isEmpty else {
+            completion()
+            return
+        }
+        
         let predicate = HKQuery.predicateForSamples(
             withStart: .distantPast,
             end: .distantFuture,
@@ -219,8 +224,14 @@ class HealthKitManager: ObservableObject {
             }
         }
         
-        print("DEBUG: Wiping prior app-written samples for dummy-related types (\(types.count) object types)...")
+        print("DEBUG: Wiping prior app-written samples (\(types.count) object types)...")
         deleteNext(index: 0)
+    }
+    
+    private func deleteAllSamplesForDummyImportTypesThenRun(
+        completion: @escaping () -> Void
+    ) {
+        deleteAllSamplesForTypesThenRun(objectTypesForDummyDataWipe(), completion: completion)
     }
     
     // Helper to ensure auth exists before inserting
@@ -271,6 +282,100 @@ class HealthKitManager: ObservableObject {
                     print("DEBUG: Heart Rate insertion executed.")
                     
                     print("DEBUG: All dummy data insertion tasks finished.")
+                }
+            }
+        }
+    }
+    
+    /// One dummy metric at a time: clears only HealthKit types used by that metric, then inserts fresh dummy samples.
+    enum DummyHealthMetric: String, CaseIterable, Identifiable {
+        case steps
+        case weight
+        case bodyTemperature
+        case oxygenSaturation
+        case bloodPressure
+        case bloodGlucose
+        case distanceWalkingRunning
+        case heartRate
+        
+        var id: String { rawValue }
+        
+        var displayTitle: String {
+            switch self {
+            case .steps: return "Steps"
+            case .weight: return "Weight"
+            case .bodyTemperature: return "Body Temperature"
+            case .oxygenSaturation: return "Oxygen Saturation"
+            case .bloodPressure: return "Blood Pressure"
+            case .bloodGlucose: return "Blood Glucose"
+            case .distanceWalkingRunning: return "Distance Walking/Running"
+            case .heartRate: return "Heart Rate"
+            }
+        }
+        
+        fileprivate func objectTypesToClear() -> [HKObjectType] {
+            func q(_ id: HKQuantityTypeIdentifier) -> HKObjectType? {
+                HKQuantityType.quantityType(forIdentifier: id)
+            }
+            switch self {
+            case .steps:
+                return [q(.stepCount)].compactMap { $0 }
+            case .weight:
+                return [q(.bodyMass)].compactMap { $0 }
+            case .bodyTemperature:
+                return [q(.bodyTemperature)].compactMap { $0 }
+            case .oxygenSaturation:
+                return [q(.oxygenSaturation)].compactMap { $0 }
+            case .bloodPressure:
+                var types: [HKObjectType] = [q(.bloodPressureSystolic), q(.bloodPressureDiastolic)].compactMap { $0 }
+                if let bp = HKCorrelationType.correlationType(forIdentifier: .bloodPressure) {
+                    types.append(bp)
+                }
+                return types
+            case .bloodGlucose:
+                return [q(.bloodGlucose)].compactMap { $0 }
+            case .distanceWalkingRunning:
+                return [q(.distanceWalkingRunning)].compactMap { $0 }
+            case .heartRate:
+                return [q(.heartRate)].compactMap { $0 }
+            }
+        }
+    }
+    
+    func triggerDummyDataInsertion(for metric: DummyHealthMetric) {
+        print("DEBUG: Requesting HealthKit authorization (single metric: \(metric.displayTitle))...")
+        
+        requestHealthAuthorization { [weak self] success in
+            guard success else {
+                print("ERROR: HealthKit authorization failed. \(metric.displayTitle) dummy insertion aborted.")
+                return
+            }
+            
+            let queue = DispatchQueue.global(qos: .userInitiated)
+            queue.async { [weak self] in
+                guard let self else { return }
+                let types = metric.objectTypesToClear()
+                self.deleteAllSamplesForTypesThenRun(types) {
+                    print("DEBUG: Starting dummy insertion for \(metric.displayTitle)...")
+                    switch metric {
+                    case .steps:
+                        self.insertDummyStepsData()
+                    case .weight:
+                        self.insertDummyWeightData()
+                    case .bodyTemperature:
+                        self.insertDummyTemperatureData()
+                    case .oxygenSaturation:
+                        self.insertDummyO2Data()
+                    case .bloodPressure:
+                        self.insertDummyBloodPressureData()
+                    case .bloodGlucose:
+                        self.insertDummyBloodGlucoseData()
+                    case .distanceWalkingRunning:
+                        self.insertDummyDistanceWalkingRunningData()
+                    case .heartRate:
+                        self.insertDummyHeartRateData()
+                    }
+                    print("DEBUG: Dummy insertion dispatched for \(metric.displayTitle).")
                 }
             }
         }

@@ -69,6 +69,34 @@ struct ContentView: View {
                     }
                     .padding(.vertical, 8)
                 
+                Section("Dummy data (one type)") {
+                    ForEach(HealthKitManager.DummyHealthMetric.allCases) { metric in
+                        HStack {
+                            Button(action: {
+                                hkManager.triggerDummyDataInsertion(for: metric)
+                            }) {
+                                Image(systemName: "cylinder.split.1x2")
+                                    .foregroundColor(.orange)
+                                    .imageScale(.large)
+                            }
+                            Text(metric.displayTitle)
+                                .font(.subheadline)
+                            
+                            Spacer()
+                            
+                            Button("Authorize") {
+                                hkManager.requestHealthAuthorization { success in
+                                    print("Authorization result: \(success)")
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.blue)
+                            .buttonStyle(.borderless)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+                
                 HStack {
                     Button(action: {
                         hkManager.triggerStressTestSpO2HeartRateInsertion()
