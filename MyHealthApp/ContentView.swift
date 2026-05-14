@@ -11,6 +11,7 @@ import HealthKit
 struct ContentView: View {
     // Initialize our manager
     @StateObject var hkManager = HealthKitManager()
+    @Environment(\.scenePhase) private var scenePhase
     
     var body: some View {
         NavigationView {
@@ -37,6 +38,7 @@ struct ContentView: View {
                         // .buttonStyle(.borderless) is important here!
                         // Without it, clicking the button triggers the NavigationLink
                         .buttonStyle(.borderless)
+                        .disabled(hkManager.isDistanceWalkingReadAuthUnnecessary)
                     }
                     .padding(.vertical, 8)
                 }
@@ -65,6 +67,7 @@ struct ContentView: View {
                     // .buttonStyle(.borderless) is important here!
                     // Without it, clicking the button triggers the NavigationLink
                     .buttonStyle(.borderless)
+                    .disabled(hkManager.isStepsAuthorized)
                     
                 }
                 .padding(.vertical, 8)
@@ -92,6 +95,7 @@ struct ContentView: View {
                             .buttonStyle(.bordered)
                             .tint(.blue)
                             .buttonStyle(.borderless)
+                            .disabled(hkManager.isStepsAuthorized)
                         }
                         .padding(.vertical, 4)
                     }
@@ -118,11 +122,20 @@ struct ContentView: View {
                     .buttonStyle(.bordered)
                     .tint(.blue)
                     .buttonStyle(.borderless)
+                    .disabled(hkManager.isStepsAuthorized)
                 }
                 .padding(.vertical, 8)
                 
             }
             .navigationTitle("Health Dashboard")
+            .onAppear {
+                hkManager.refreshAuthorizationButtonsState()
+            }
+            .onChange(of: scenePhase) { newPhase in
+                if newPhase == .active {
+                    hkManager.refreshAuthorizationButtonsState()
+                }
+            }
             .alert("Health Access Required", isPresented: $hkManager.showSettingsAlert) {
                 Button("Settings") {
                     if let url = URL(string: UIApplication.openSettingsURLString) {
@@ -132,6 +145,16 @@ struct ContentView: View {
                 Button("Cancel", role: .cancel) { }
             } message: {
                 Text("Authorization was previously denied. Please enable Health access in Settings to use this feature.")
+            }
+            .alert("Health access granted", isPresented: $hkManager.showPermissionAuthorizedAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("Health permissions were authorized. You can import or read data from Health.")
+            }
+            .alert("Dummy data import complete", isPresented: $hkManager.showDummyDataImportedAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(hkManager.dummyDataImportedMessage)
             }
         }
     }

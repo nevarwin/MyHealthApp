@@ -15,8 +15,14 @@ class HealthKitManager: ObservableObject {
     
     @Published var walks: [WalkData] = []
     @Published var isFetching = false
+    /// True when step-count **sharing** is authorized (same gate used for the full read/write bundle in `requestHealthAuthorization`).
     @Published var isStepsAuthorized = false
+    /// True when HealthKit reports that requesting read access for walking/running distance would be unnecessary (typically already handled).
+    @Published var isDistanceWalkingReadAuthUnnecessary = false
     @Published var showSettingsAlert = false
+    @Published var showPermissionAuthorizedAlert = false
+    @Published var showDummyDataImportedAlert = false
+    @Published var dummyDataImportedMessage = ""
     
     private var anchor: HKQueryAnchor?
     private let anchorKey = "walking_anchor" // Key for UserDefaults
@@ -26,6 +32,41 @@ class HealthKitManager: ObservableObject {
         loadAnchor()
         // 2. Load the visual data from DB
         loadLocalData()
+        refreshAuthorizationButtonsState()
+    }
+    
+    /// Updates published flags used to enable/disable Authorize buttons (call on launch, on appear, and after authorization flows).
+    func refreshAuthorizationButtonsState() {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            DispatchQueue.main.async {
+                self.isStepsAuthorized = false
+                self.isDistanceWalkingReadAuthUnnecessary = false
+            }
+            return
+        }
+        
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            
+            if let stepsType = HKQuantityType.quantityType(forIdentifier: .stepCount) {
+                let stepStatus = self.healthStore.authorizationStatus(for: stepsType)
+                self.isStepsAuthorized = (stepStatus == .sharingAuthorized)
+            }
+            
+            guard let distanceType = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) else {
+                self.isDistanceWalkingReadAuthUnnecessary = false
+                return
+            }
+            self.healthStore.getRequestStatusForAuthorization(toShare: [], read: [distanceType]) { [weak self] status, error in
+                guard let self else { return }
+                if let error = error {
+                    print("DEBUG: Distance read auth status error: \(error.localizedDescription)")
+                }
+                DispatchQueue.main.async {
+                    self.isDistanceWalkingReadAuthUnnecessary = (status == .unnecessary)
+                }
+            }
+        }
     }
     
     // MARK: - Anchor Persistence (The Fix)
@@ -60,7 +101,9 @@ class HealthKitManager: ObservableObject {
     
     func distanceWalkingRunningAuthorization() {
         guard let type = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) else { return }
-        healthStore.requestAuthorization(toShare: nil, read: [type]) { _, _ in }
+        healthStore.requestAuthorization(toShare: nil, read: [type]) { [weak self] _, _ in
+            self?.refreshAuthorizationButtonsState()
+        }
     }
     
     func fetchWalkingRunningDistance() {
@@ -110,7 +153,8 @@ class HealthKitManager: ObservableObject {
         healthStore.execute(query)
     }
     // MARK: - Authorization
-    func requestHealthAuthorization(completion: @escaping (Bool) -> Void) {
+    /// - Parameter showPermissionSuccessAlert: When false, skips the "access granted" alert (use for flows that already show their own completion UI, e.g. dummy import).
+    func requestHealthAuthorization(showPermissionSuccessAlert: Bool = true, completion: @escaping (Bool) -> Void) {
         print("STEP 1: Function started")
         
         guard HKHealthStore.isHealthDataAvailable() else {
@@ -145,7 +189,7 @@ class HealthKitManager: ObservableObject {
             if !success {
                 print("Authorization failed or was cancelled. Prompting again...")
                 // Recursive call to "prompt again" if the user cancelled
-                self.requestHealthAuthorization(completion: completion)
+                self.requestHealthAuthorization(showPermissionSuccessAlert: showPermissionSuccessAlert, completion: completion)
                 return
             }
             
@@ -156,16 +200,19 @@ class HealthKitManager: ObservableObject {
             }
             
             let status = self.healthStore.authorizationStatus(for: stepsType)
-            
-            DispatchQueue.main.async {
-                self.isStepsAuthorized = (status == .sharingAuthorized)
-                if status == .sharingDenied {
-                    self.showSettingsAlert = true
-                }
-            }
+            let granted = (status == .sharingAuthorized)
             
             print("Authorization status for steps: \(status.rawValue)")
-            completion(status == .sharingAuthorized)
+            DispatchQueue.main.async {
+                self.isStepsAuthorized = granted
+                if status == .sharingDenied {
+                    self.showSettingsAlert = true
+                } else if granted, showPermissionSuccessAlert {
+                    self.showPermissionAuthorizedAlert = true
+                }
+                completion(granted)
+                self.refreshAuthorizationButtonsState()
+            }
         }
         
         print("STEP 6: Code execution continued after requestAuthorization call (waiting for callback)")
@@ -258,7 +305,7 @@ class HealthKitManager: ObservableObject {
     func triggerDummyDataInsertion() {
         print("DEBUG: Requesting HealthKit authorization...")
         
-        requestHealthAuthorization { [weak self] success in
+        requestHealthAuthorization(showPermissionSuccessAlert: false) { [weak self] success in
             guard success else {
                 // Error Log: Critical failure point
                 print("ERROR: HealthKit authorization failed or was denied by user. Data insertion aborted.")
@@ -273,6 +320,10 @@ class HealthKitManager: ObservableObject {
                 guard let self else { return }
                 self.sequentiallyDeleteThenInsertDummyMetrics(Array(DummyHealthMetric.allCases)) {
                     print("DEBUG: All dummy data insertion tasks finished.")
+                    DispatchQueue.main.async {
+                        self.showDummyDataImportedAlert = true
+                        self.dummyDataImportedMessage = "Sample data for every metric was written to Health. It may take a moment to appear in the Health app."
+                    }
                 }
             }
         }
@@ -336,7 +387,7 @@ class HealthKitManager: ObservableObject {
     func triggerDummyDataInsertion(for metric: DummyHealthMetric) {
         print("DEBUG: Requesting HealthKit authorization (single metric: \(metric.displayTitle))...")
         
-        requestHealthAuthorization { [weak self] success in
+        requestHealthAuthorization(showPermissionSuccessAlert: false) { [weak self] success in
             guard success else {
                 print("ERROR: HealthKit authorization failed. \(metric.displayTitle) dummy insertion aborted.")
                 return
@@ -350,6 +401,10 @@ class HealthKitManager: ObservableObject {
                     print("DEBUG: Starting dummy insertion for \(metric.displayTitle)...")
                     self.insertDummySamples(for: metric)
                     print("DEBUG: Dummy insertion dispatched for \(metric.displayTitle).")
+                    DispatchQueue.main.async {
+                        self.showDummyDataImportedAlert = true
+                        self.dummyDataImportedMessage = "Sample data for \(metric.displayTitle) was written to Health. It may take a moment to appear in the Health app."
+                    }
                 }
             }
         }
@@ -363,7 +418,7 @@ class HealthKitManager: ObservableObject {
     ) {
         print("DEBUG: Stress test — requesting HealthKit authorization...")
         
-        requestHealthAuthorization { [weak self] success in
+        requestHealthAuthorization(showPermissionSuccessAlert: false) { [weak self] success in
             guard success else {
                 print("ERROR: HealthKit authorization failed. Stress test insertion aborted.")
                 return
