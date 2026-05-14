@@ -173,25 +173,6 @@ class HealthKitManager: ObservableObject {
     
     // MARK: - Dummy Data Insertion Helper
     
-    /// Object types this app may write via dummy / stress-test flows. Used to clear prior app-written samples before a fresh import.
-    /// HealthKit only allows deleting samples created by this app (not all Health data on the device).
-    private func objectTypesForDummyDataWipe() -> [HKObjectType] {
-        var types: [HKObjectType] = []
-        let quantityIDs: [HKQuantityTypeIdentifier] = [
-            .stepCount, .bodyMass, .bodyTemperature, .oxygenSaturation, .bloodGlucose,
-            .distanceWalkingRunning, .heartRate, .bloodPressureSystolic, .bloodPressureDiastolic
-        ]
-        for id in quantityIDs {
-            if let t = HKQuantityType.quantityType(forIdentifier: id) {
-                types.append(t)
-            }
-        }
-        if let bp = HKCorrelationType.correlationType(forIdentifier: .bloodPressure) {
-            types.append(bp)
-        }
-        return types
-    }
-    
     /// Deletes all samples of the given types that this app is allowed to remove (typically those this app saved), across all time.
     private func deleteAllSamplesForTypesThenRun(
         _ types: [HKObjectType],
@@ -228,10 +209,49 @@ class HealthKitManager: ObservableObject {
         deleteNext(index: 0)
     }
     
-    private func deleteAllSamplesForDummyImportTypesThenRun(
+    /// Runs `delete → insert` for each metric in order so we only clear HealthKit types tied to the import about to run.
+    private func sequentiallyDeleteThenInsertDummyMetrics(
+        _ metrics: [DummyHealthMetric],
+        index: Int = 0,
         completion: @escaping () -> Void
     ) {
-        deleteAllSamplesForTypesThenRun(objectTypesForDummyDataWipe(), completion: completion)
+        if index >= metrics.count {
+            completion()
+            return
+        }
+        let metric = metrics[index]
+        let types = metric.objectTypesToClear()
+        deleteAllSamplesForTypesThenRun(types) { [weak self] in
+            guard let self else {
+                completion()
+                return
+            }
+            print("DEBUG: Starting batch insertion for \(metric.displayTitle)...")
+            self.insertDummySamples(for: metric)
+            print("DEBUG: \(metric.displayTitle) insertion executed.")
+            self.sequentiallyDeleteThenInsertDummyMetrics(metrics, index: index + 1, completion: completion)
+        }
+    }
+    
+    private func insertDummySamples(for metric: DummyHealthMetric) {
+        switch metric {
+            case .steps:
+                insertDummyStepsData()
+            case .weight:
+                insertDummyWeightData()
+            case .bodyTemperature:
+                insertDummyTemperatureData()
+            case .oxygenSaturation:
+                insertDummyO2Data()
+            case .bloodPressure:
+                insertDummyBloodPressureData()
+            case .bloodGlucose:
+                insertDummyBloodGlucoseData()
+            case .distanceWalkingRunning:
+                insertDummyDistanceWalkingRunningData()
+            case .heartRate:
+                insertDummyHeartRateData()
+        }
     }
     
     // Helper to ensure auth exists before inserting
@@ -251,36 +271,7 @@ class HealthKitManager: ObservableObject {
             let queue = DispatchQueue.global(qos: .userInitiated)
             queue.async {
                 guard let self else { return }
-                self.deleteAllSamplesForDummyImportTypesThenRun {
-                    print("DEBUG: Starting batch insertion operations...")
-                    
-                    // Note: Since these methods are called sequentially, we log as we go
-                    // to identify which specific operation might be causing issues if the app crashes.
-                    
-//                    self.insertDummyStepsData()
-//                    print("DEBUG: Steps insertion executed.")
-//
-//                    self.insertDummyWeightData()
-//                    print("DEBUG: Weight insertion executed.")
-//
-//                    self.insertDummyTemperatureData()
-//                    print("DEBUG: Temperature insertion executed.")
-                    
-                    self.insertDummyO2Data()
-                    print("DEBUG: Oxygen Saturation insertion executed.")
-                    
-//                    self.insertDummyBloodPressureData()
-//                    print("DEBUG: Blood Pressure insertion executed.")
-//
-//                    self.insertDummyBloodGlucoseData()
-//                    print("DEBUG: Blood Glucose insertion executed.")
-//
-//                    self.insertDummyDistanceWalkingRunningData()
-//                    print("DEBUG: Distance Walking/Running insertion executed.")
-                    
-                    self.insertDummyHeartRateData()
-                    print("DEBUG: Heart Rate insertion executed.")
-                    
+                self.sequentiallyDeleteThenInsertDummyMetrics(Array(DummyHealthMetric.allCases)) {
                     print("DEBUG: All dummy data insertion tasks finished.")
                 }
             }
@@ -302,14 +293,14 @@ class HealthKitManager: ObservableObject {
         
         var displayTitle: String {
             switch self {
-            case .steps: return "Steps"
-            case .weight: return "Weight"
-            case .bodyTemperature: return "Body Temperature"
-            case .oxygenSaturation: return "Oxygen Saturation"
-            case .bloodPressure: return "Blood Pressure"
-            case .bloodGlucose: return "Blood Glucose"
-            case .distanceWalkingRunning: return "Distance Walking/Running"
-            case .heartRate: return "Heart Rate"
+                case .steps: return "Steps"
+                case .weight: return "Weight"
+                case .bodyTemperature: return "Body Temperature"
+                case .oxygenSaturation: return "Oxygen Saturation"
+                case .bloodPressure: return "Blood Pressure"
+                case .bloodGlucose: return "Blood Glucose"
+                case .distanceWalkingRunning: return "Distance Walking/Running"
+                case .heartRate: return "Heart Rate"
             }
         }
         
@@ -318,26 +309,26 @@ class HealthKitManager: ObservableObject {
                 HKQuantityType.quantityType(forIdentifier: id)
             }
             switch self {
-            case .steps:
-                return [q(.stepCount)].compactMap { $0 }
-            case .weight:
-                return [q(.bodyMass)].compactMap { $0 }
-            case .bodyTemperature:
-                return [q(.bodyTemperature)].compactMap { $0 }
-            case .oxygenSaturation:
-                return [q(.oxygenSaturation)].compactMap { $0 }
-            case .bloodPressure:
-                var types: [HKObjectType] = [q(.bloodPressureSystolic), q(.bloodPressureDiastolic)].compactMap { $0 }
-                if let bp = HKCorrelationType.correlationType(forIdentifier: .bloodPressure) {
-                    types.append(bp)
-                }
-                return types
-            case .bloodGlucose:
-                return [q(.bloodGlucose)].compactMap { $0 }
-            case .distanceWalkingRunning:
-                return [q(.distanceWalkingRunning)].compactMap { $0 }
-            case .heartRate:
-                return [q(.heartRate)].compactMap { $0 }
+                case .steps:
+                    return [q(.stepCount)].compactMap { $0 }
+                case .weight:
+                    return [q(.bodyMass)].compactMap { $0 }
+                case .bodyTemperature:
+                    return [q(.bodyTemperature)].compactMap { $0 }
+                case .oxygenSaturation:
+                    return [q(.oxygenSaturation)].compactMap { $0 }
+                case .bloodPressure:
+                    var types: [HKObjectType] = [q(.bloodPressureSystolic), q(.bloodPressureDiastolic)].compactMap { $0 }
+                    if let bp = HKCorrelationType.correlationType(forIdentifier: .bloodPressure) {
+                        types.append(bp)
+                    }
+                    return types
+                case .bloodGlucose:
+                    return [q(.bloodGlucose)].compactMap { $0 }
+                case .distanceWalkingRunning:
+                    return [q(.distanceWalkingRunning)].compactMap { $0 }
+                case .heartRate:
+                    return [q(.heartRate)].compactMap { $0 }
             }
         }
     }
@@ -357,24 +348,7 @@ class HealthKitManager: ObservableObject {
                 let types = metric.objectTypesToClear()
                 self.deleteAllSamplesForTypesThenRun(types) {
                     print("DEBUG: Starting dummy insertion for \(metric.displayTitle)...")
-                    switch metric {
-                    case .steps:
-                        self.insertDummyStepsData()
-                    case .weight:
-                        self.insertDummyWeightData()
-                    case .bodyTemperature:
-                        self.insertDummyTemperatureData()
-                    case .oxygenSaturation:
-                        self.insertDummyO2Data()
-                    case .bloodPressure:
-                        self.insertDummyBloodPressureData()
-                    case .bloodGlucose:
-                        self.insertDummyBloodGlucoseData()
-                    case .distanceWalkingRunning:
-                        self.insertDummyDistanceWalkingRunningData()
-                    case .heartRate:
-                        self.insertDummyHeartRateData()
-                    }
+                    self.insertDummySamples(for: metric)
                     print("DEBUG: Dummy insertion dispatched for \(metric.displayTitle).")
                 }
             }
@@ -398,7 +372,10 @@ class HealthKitManager: ObservableObject {
             let queue = DispatchQueue.global(qos: .userInitiated)
             queue.async { [weak self] in
                 guard let self else { return }
-                self.deleteAllSamplesForDummyImportTypesThenRun {
+                let stressTypes =
+                    DummyHealthMetric.oxygenSaturation.objectTypesToClear()
+                    + DummyHealthMetric.heartRate.objectTypesToClear()
+                self.deleteAllSamplesForTypesThenRun(stressTypes) {
                     let anchor = Date()
                     let (spO2Dates, windowStart, _) = self.stressTestSpO2Window(spanYears: spO2SpanYears, spO2Count: spO2SampleCount, windowEnd: anchor)
                     guard !spO2Dates.isEmpty else {
@@ -676,7 +653,7 @@ class HealthKitManager: ObservableObject {
             return ([], windowEnd, windowEnd)
         }
         guard spO2Count > 0 else { return ([], windowStart, windowEnd) }
-
+        
         var dayStarts: [Date] = []
         var d = calendar.startOfDay(for: windowStart)
         while d <= windowEnd {
@@ -686,23 +663,23 @@ class HealthKitManager: ObservableObject {
         }
         let numDays = dayStarts.count
         guard numDays > 0 else { return ([], windowStart, windowEnd) }
-
+        
         let basePerDay = spO2Count / numDays
         let extraSamples = spO2Count % numDays
-
+        
         var dates: [Date] = []
         dates.reserveCapacity(spO2Count)
-
+        
         for (dayIndex, dayStart) in dayStarts.enumerated() {
             let nToday = basePerDay + (dayIndex < extraSamples ? 1 : 0)
             guard nToday > 0 else { continue }
-
+            
             guard let dayEndExclusive = calendar.date(byAdding: .day, value: 1, to: dayStart) else { continue }
             let sliceStart = max(dayStart, windowStart)
             let sliceEnd = min(dayEndExclusive, windowEnd)
             let slice = sliceEnd.timeIntervalSince(sliceStart)
             guard slice > 0 else { continue }
-
+            
             let denom = Double(max(1, nToday - 1))
             for i in 0..<nToday {
                 let u = nToday == 1 ? 0.5 : Double(i) / denom
@@ -711,7 +688,7 @@ class HealthKitManager: ObservableObject {
                 dates.append(t)
             }
         }
-
+        
         dates.sort()
         return (dates, windowStart, windowEnd)
     }
