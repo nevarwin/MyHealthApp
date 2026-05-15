@@ -12,6 +12,7 @@ struct ContentView: View {
     // Initialize our manager
     @StateObject var hkManager = HealthKitManager()
     @Environment(\.scenePhase) private var scenePhase
+    @State private var showDeleteAllLocalDataConfirm = false
     
     var body: some View {
         NavigationView {
@@ -126,6 +127,16 @@ struct ContentView: View {
                 }
                 .padding(.vertical, 8)
                 
+                Section {
+                    Button(role: .destructive) {
+                        showDeleteAllLocalDataConfirm = true
+                    } label: {
+                        Label("Delete all app health data", systemImage: "trash")
+                    }
+                } footer: {
+                    Text("Removes walking history saved in this app and resets sync. Samples in the Apple Health app are not deleted.")
+                }
+                
             }
             .navigationTitle("Health Dashboard")
             .onAppear {
@@ -155,6 +166,18 @@ struct ContentView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text(hkManager.dummyDataImportedMessage)
+            }
+            .confirmationDialog(
+                "Delete all data stored in this app?",
+                isPresented: $showDeleteAllLocalDataConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Delete all", role: .destructive) {
+                    hkManager.deleteAllLocallyCachedHealthData()
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This clears your local walking totals and the sync bookmark. You can pull data from Health again with Refresh.")
             }
         }
     }

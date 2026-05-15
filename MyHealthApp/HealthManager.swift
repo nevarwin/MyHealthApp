@@ -99,6 +99,16 @@ class HealthKitManager: ObservableObject {
         }
     }
     
+    /// Clears all walking-distance history stored in this app’s database and resets the anchored query bookmark so the next sync can re-read from HealthKit. Does **not** delete samples in the Apple Health app.
+    func deleteAllLocallyCachedHealthData() {
+        dbHelper.deleteAllWalkingData()
+        UserDefaults.standard.removeObject(forKey: anchorKey)
+        anchor = nil
+        DispatchQueue.main.async {
+            self.walks = []
+        }
+    }
+    
     func distanceWalkingRunningAuthorization() {
         guard let type = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) else { return }
         healthStore.requestAuthorization(toShare: nil, read: [type]) { [weak self] _, _ in

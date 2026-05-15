@@ -101,4 +101,14 @@ class DBHelper {
         sqlite3_finalize(stmt)
         return result
     }
+    
+    /// Removes every row in `WalkingData` (local cache only).
+    func deleteAllWalkingData() {
+        let sql = "DELETE FROM WalkingData;"
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
+            sqlite3_step(stmt)
+        }
+        sqlite3_finalize(stmt)
+    }
 }
